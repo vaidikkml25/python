@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Friend Recommender</title>
+<style>
+:root{--bg:#f1f5f9;--panel:#fff;--ink:#14202e;--mute:#5b6b7c;--line:#cfd8e2;--user:#2f855a;--friend:#2b6cb0;--rec:#c05621;--other:#8a97a6;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0e1620;--panel:#16212d;--ink:#e6edf5;--mute:#93a3b5;--line:#2a3a4b;--user:#48bb78;--friend:#63a4e8;--rec:#f0914f;--other:#6b7b8d}}
+:root[data-theme="dark"]{--bg:#0e1620;--panel:#16212d;--ink:#e6edf5;--mute:#93a3b5;--line:#2a3a4b;--user:#48bb78;--friend:#63a4e8;--rec:#f0914f;--other:#6b7b8d}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:1040px;margin:0 auto;padding:20px 16px 40px}
+h1{font:600 clamp(1.7rem,4vw,2.4rem)/1.15 Georgia,"Iowan Old Style",serif;margin:8px 0 6px}
+.lede{color:var(--mute);max-width:62ch;margin:0 0 20px}
+.grid{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);gap:16px}
+@media(max-width:760px){.grid{grid-template-columns:1fr}}
+section{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px}
+h2{font:600 1.05rem/1.3 Georgia,serif;margin:0 0 10px}
+svg{width:100%;height:auto;display:block}
+.legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:.85rem;color:var(--mute);margin-top:8px}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px}
+label{display:block;font-size:.85rem;color:var(--mute);margin:10px 0 4px}
+select,input{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:8px 10px;width:100%;min-height:42px}
+.row{display:flex;gap:8px}
+button{font:inherit;font-weight:600;border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:6px;padding:8px 14px;min-height:42px;cursor:pointer}
+button.primary{background:var(--friend);border-color:var(--friend);color:#fff}
+:root[data-theme="dark"] button.primary{color:#0e1620}
+button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visible{outline:3px solid var(--rec);outline-offset:2px}
+.msg{min-height:1.4em;font-size:.88rem;margin:8px 0 0;color:var(--rec)}
+ol.recs{list-style:none;margin:0;padding:0}
+ol.recs li{border-top:1px solid var(--line);padding:10px 0}
+ol.recs li:first-child{border-top:0}
+.name{font-weight:600}
+.badge{float:right;color:var(--rec);font-weight:600}
+.who{color:var(--mute);font-size:.88rem}
+.empty{color:var(--mute)}
+details{margin-top:16px}
+summary{cursor:pointer;font-weight:600}
+pre{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:12px;overflow-x:auto;font:12.5px/1.5 ui-monospace,Menlo,Consolas,monospace}
+.top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+</style>
+</head>
+<body>
+<main>
+<div class="top">
+<div>
+<h1>Friend Recommender</h1>
+<p class="lede">Pick a person and see who they may know. The program looks at friends of friends and ranks them by how many mutual friends they share.</p>
+</div>
+<button id="theme" aria-label="Switch light or dark theme">Theme</button>
+</div>
+
+<div class="grid">
+<section aria-label="Network">
+<h2>Network</h2>
+<svg id="net" viewBox="0 0 400 330" role="img" aria-label="Social network graph"></svg>
+<div class="legend">
+<span><i style="background:var(--user)"></i>Selected person</span>
+<span><i style="background:var(--friend)"></i>Friend</span>
+<span><i style="background:var(--rec)"></i>Recommended</span>
+<span><i style="background:var(--other)"></i>Not connected within two steps</span>
+</div>
+</section>
+
+<div>
+<section aria-label="Recommendations">
+<h2>Recommendations</h2>
+<label for="who">Recommend friends for</label>
+<select id="who"></select>
+<label for="topn">Show up to</label>
+<select id="topn"><option>1</option><option>3</option><option selected>5</option><option>10</option></select>
+<ol class="recs" id="recs" aria-live="polite" style="margin-top:12px"></ol>
+</section>
+
+<section aria-label="Add friendship" style="margin-top:16px">
+<h2>Add a friendship</h2>
+<div class="row">
+<div style="flex:1"><label for="a" style="margin-top:0">Person</label><input id="a" placeholder="e.g. Aarav" autocomplete="off"></div>
+<div style="flex:1"><label for="b" style="margin-top:0">Friend</label><input id="b" placeholder="e.g. Zoya" autocomplete="off"></div>
+</div>
+<div class="row" style="margin-top:10px">
+<button class="primary" id="add">Add friendship</button>
+<button id="sample">Reset sample network</button>
+</div>
+<p class="msg" id="msg" role="status"></p>
+</section>
+</div>
+</div>
+
+<details>
+<summary>Python code behind this page</summary>
+<pre>graph = {}
+
+def add_user(name):
+    graph.setdefault(name, set())
+
+def add_friend(a, b):
+    add_user(a); add_user(b)
+    graph[a].add(b); graph[b].add(a)
+
+def mutual_friends(u1, u2):
+    return graph[u1] &amp; graph[u2]
+
+def recommend(user, top_n=5):
+    scores = {}
+    for friend in graph[user]:
+        for fof in graph[friend]:
+            if fof != user and fof not in graph[user]:
+                scores[fof] = scores.get(fof, 0) + 1
+    ranked = sorted(scores.items(), key=lambda x: -x[1])
+    return ranked[:top_n]</pre>
+</details>
+</main>
+
+<script>
+(function(){
+var graph = new Map();
+var SAMPLE = [["Aarav","Isha"],["Aarav","Rohan"],["Aarav","Neha"],["Isha","Meera"],["Rohan","Meera"],["Neha","Meera"],["Isha","Kabir"],["Rohan","Kabir"],["Neha","Sara"],["Kabir","Tanvi"],["Sara","Dev"],["Zoya","Yash"]];
+
+function addUser(n){ if(!graph.has(n)) graph.set(n,new Set()); }
+function addFriend(a,b){ addUser(a); addUser(b); graph.get(a).add(b); graph.get(b).add(a); }
+function mutual(u1,u2){ var r=[]; graph.get(u1).forEach(function(x){ if(graph.get(u2).has(x)) r.push(x); }); return r; }
+function recommend(user,topN){
+  var scores = new Map(), mine = graph.get(user);
+  mine.forEach(function(f){
+    graph.get(f).forEach(function(fof){
+      if(fof!==user && !mine.has(fof)) scores.set(fof,(scores.get(fof)||0)+1);
+    });
+  });
+  var ranked = Array.from(scores.entries()).sort(function(x,y){ return y[1]-x[1]; });
+  return ranked.slice(0,topN);
+}
+
+var $ = function(id){ return document.getElementById(id); };
+var NS = "http://www.w3.org/2000/svg";
+function el(tag,attrs,parent){ var e=document.createElementNS(NS,tag); for(var k in attrs) e.setAttribute(k,attrs[k]); if(parent) parent.appendChild(e); return e; }
+
+function render(){
+  var names = Array.from(graph.keys()).sort();
+  var who = $("who"), cur = who.value;
+  who.innerHTML = "";
+  names.forEach(function(n){ var o=document.createElement("option"); o.textContent=n; who.appendChild(o); });
+  who.value = names.indexOf(cur)>=0 ? cur : (names[0]||"");
+  var user = who.value, topN = parseInt($("topn").value,10);
+  var recs = user ? recommend(user,topN) : [];
+  var recSet = new Set(recs.map(function(r){return r[0];}));
+
+  var list = $("recs"); list.innerHTML = "";
+  if(!user){ list.innerHTML = '<li class="empty">Add a friendship to get started.</li>'; }
+  else if(!recs.length){ list.innerHTML = '<li class="empty">No one to recommend yet. ' + user + ' has no friends of friends outside their own circle.</li>'; }
+  recs.forEach(function(r){
+    var li = document.createElement("li");
+    var m = mutual(user,r[0]);
+    li.innerHTML = '<span class="badge">' + r[1] + ' mutual</span><div class="name"></div><div class="who"></div>';
+    li.querySelector(".name").textContent = r[0];
+    li.querySelector(".who").textContent = "Mutual friends: " + m.sort().join(", ");
+    list.appendChild(li);
+  });
+
+  var svg = $("net"); svg.innerHTML = "";
+  var n = names.length, cx = 200, cy = 165, R = Math.min(135, 40 + n*12), pos = {};
+  names.forEach(function(nm,i){ var t = -Math.PI/2 + 2*Math.PI*i/Math.max(n,1); pos[nm] = [cx + R*1.2*Math.cos(t), cy + R*Math.sin(t)]; });
+  var seen = {};
+  names.forEach(function(a){ graph.get(a).forEach(function(b){
+    var k = [a,b].sort().join("|"); if(seen[k]) return; seen[k]=1;
+    el("line",{x1:pos[a][0],y1:pos[a][1],x2:pos[b][0],y2:pos[b][1],stroke:"var(--line)","stroke-width":1.6},svg);
+  }); });
+  recs.forEach(function(r){ el("line",{x1:pos[user][0],y1:pos[user][1],x2:pos[r[0]][0],y2:pos[r[0]][1],stroke:"var(--rec)","stroke-width":2,"stroke-dasharray":"5 4"},svg); });
+  names.forEach(function(nm){
+    var c = "var(--other)";
+    if(nm===user) c = "var(--user)"; else if(user && graph.get(user).has(nm)) c = "var(--friend)"; else if(recSet.has(nm)) c = "var(--rec)";
+    el("circle",{cx:pos[nm][0],cy:pos[nm][1],r:6.5,fill:c},svg);
+    var t = el("text",{x:pos[nm][0],y:pos[nm][1]-11,"text-anchor":"middle","font-size":12,fill:"var(--ink)"},svg);
+    t.textContent = nm;
+  });
+}
+
+function say(t){ $("msg").textContent = t; }
+function clean(s){ return s.trim().replace(/\s+/g," "); }
+
+$("add").addEventListener("click",function(){
+  var a = clean($("a").value), b = clean($("b").value);
+  if(!a || !b){ say("Enter both names."); return; }
+  if(a.toLowerCase()===b.toLowerCase()){ say("A person cannot befriend themselves."); return; }
+  var find = function(x){ var f=null; graph.forEach(function(_,k){ if(k.toLowerCase()===x.toLowerCase()) f=k; }); return f||x; };
+  a = find(a); b = find(b);
+  if(graph.has(a) && graph.get(a).has(b)){ say(a+" and "+b+" are already friends."); return; }
+  addFriend(a,b); say("Added "+a+" and "+b+"."); $("a").value=""; $("b").value=""; $("who").value=a; render();
+});
+$("sample").addEventListener("click",function(){ graph.clear(); SAMPLE.forEach(function(p){ addFriend(p[0],p[1]); }); say("Sample network restored."); $("who").value="Aarav"; render(); });
+$("who").addEventListener("change",render); $("topn").addEventListener("change",render);
+$("theme").addEventListener("click",function(){
+  var r=document.documentElement, dark = r.getAttribute("data-theme")==="dark" || (!r.getAttribute("data-theme") && matchMedia("(prefers-color-scheme: dark)").matches);
+  r.setAttribute("data-theme", dark?"light":"dark");
+});
+SAMPLE.forEach(function(p){ addFriend(p[0],p[1]); });
+$("who").value = "Aarav";
+render();
+})();
+</script>
+</body>
+</html>
