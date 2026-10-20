@@ -1,0 +1,8 @@
+friend_recommender/
+│
+├── app.py
+├── requirements.txt
+├── templates/
+│   └── index.html
+└── static/
+    └── style.css
