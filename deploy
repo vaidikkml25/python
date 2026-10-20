@@ -1,0 +1,336 @@
+import streamlit as st
+import networkx as nx
+import pandas as pd
+import matplotlib.pyplot as plt
+
+st.set_page_config(
+    page_title="FriendMatch | Social Network",
+    page_icon="🤝",
+    layout="wide"
+)
+
+# ---------- Styling ----------
+st.markdown("""
+<style>
+.stApp {
+    background: #f6f8fc;
+}
+[data-testid="stSidebar"] {
+    background: #10172a;
+}
+[data-testid="stSidebar"] * {
+    color: #f8fafc;
+}
+.hero {
+    background: linear-gradient(120deg, #4338ca, #0f9b8e);
+    color: white;
+    padding: 28px;
+    border-radius: 18px;
+    margin-bottom: 22px;
+}
+.hero h1 { color: white; }
+.metric {
+    background: white;
+    border: 1px solid #e5e7eb;
+    border-radius: 14px;
+    padding: 18px;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# ---------- Sample social network ----------
+@st.cache_resource
+def create_network():
+    graph = nx.Graph()
+
+    people = {
+        "Aarav": {"age": 21, "interests": ["Python", "AI", "Music"]},
+        "Priya": {"age": 22, "interests": ["AI", "Music", "Travel"]},
+        "Rohan": {"age": 20, "interests": ["Python", "Gaming", "AI"]},
+        "Ananya": {"age": 21, "interests": ["Music", "Travel", "Art"]},
+        "Kabir": {"age": 23, "interests": ["Python", "Sports", "Gaming"]},
+        "Isha": {"age": 20, "interests": ["AI", "Art", "Music"]},
+        "Neha": {"age": 22, "interests": ["Travel", "Reading", "Art"]},
+        "Vikram": {"age": 21, "interests": ["Sports", "Python", "Gaming"]},
+        "Meera": {"age": 20, "interests": ["Reading", "Music", "AI"]},
+        "Arjun": {"age": 23, "interests": ["Sports", "Travel", "Python"]},
+    }
+
+    for name, data in people.items():
+        graph.add_node(name, **data)
+
+    friendships = [
+        ("Aarav", "Priya"), ("Aarav", "Rohan"),
+        ("Aarav", "Kabir"), ("Priya", "Ananya"),
+        ("Priya", "Isha"), ("Rohan", "Kabir"),
+        ("Rohan", "Vikram"), ("Ananya", "Isha"),
+        ("Ananya", "Neha"), ("Isha", "Meera"),
+        ("Kabir", "Vikram"), ("Neha", "Meera"),
+        ("Neha", "Arjun"), ("Meera", "Priya"),
+        ("Arjun", "Vikram"), ("Arjun", "Aarav")
+    ]
+
+    graph.add_edges_from(friendships)
+    return graph
+
+G = create_network()
+
+def recommend_friends(graph, person, method, limit):
+    existing = set(graph.neighbors(person))
+    existing.add(person)
+    candidates = set(graph.nodes()) - existing
+    scores = {}
+
+    for candidate in candidates:
+        mutual = len(
+            set(graph.neighbors(person))
+            & set(graph.neighbors(candidate))
+        )
+
+        if method == "Mutual Friends":
+            score = mutual
+        elif method == "Jaccard Similarity":
+            union = (
+                set(graph.neighbors(person))
+                | set(graph.neighbors(candidate))
+            )
+            score = mutual / len(union) if union else 0
+        else:
+            interests1 = set(graph.nodes[person]["interests"])
+            interests2 = set(graph.nodes[candidate]["interests"])
+            interest_score = len(interests1 & interests2)
+            score = mutual * 2 + interest_score
+
+        scores[candidate] = (score, mutual)
+
+    return sorted(
+        scores.items(),
+        key=lambda item: (item[1][0], item[1][1]),
+        reverse=True
+    )[:limit]
+
+# ---------- Sidebar ----------
+st.sidebar.title("🤝 FriendMatch")
+st.sidebar.caption("Social Network Intelligence")
+page = st.sidebar.radio(
+    "NAVIGATION",
+    ["Dashboard", "Find Friends", "Explore Network",
+     "Algorithm Lab", "About"]
+)
+
+st.sidebar.divider()
+st.sidebar.caption("Demo project • Python + NetworkX")
+
+# ---------- Dashboard ----------
+if page == "Dashboard":
+    st.markdown("""
+    <div class="hero">
+      <h1>Discover your next connection ✨</h1>
+      <p>Explore your social network and find people
+      you may know through mutual connections.</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    c1, c2, c3, c4 = st.columns(4)
+    metrics = [
+        ("Total Users", G.number_of_nodes()),
+        ("Friendships", G.number_of_edges()),
+        ("Avg. Connections", f"{sum(dict(G.degree()).values()) / G.number_of_nodes():.1f}"),
+        ("Network Density", f"{nx.density(G):.0%}")
+    ]
+
+    for col, (label, value) in zip([c1, c2, c3, c4], metrics):
+        with col:
+            st.metric(label, value)
+
+    st.subheader("Your social network")
+    left, right = st.columns([1.5, 1])
+
+    with left:
+        fig, ax = plt.subplots(figsize=(8, 5))
+        fig.patch.set_facecolor("white")
+        pos = nx.spring_layout(G, seed=42)
+
+        nx.draw_networkx_edges(
+            G, pos, ax=ax, edge_color="#cbd5e1", width=1.5
+        )
+        nx.draw_networkx_nodes(
+            G, pos, ax=ax, node_color="#6366f1",
+            node_size=850
+        )
+        nx.draw_networkx_labels(
+            G, pos, ax=ax, font_size=8,
+            font_color="white"
+        )
+        ax.axis("off")
+        st.pyplot(fig)
+        plt.close(fig)
+
+    with right:
+        st.subheader("Popular users")
+        popular = sorted(
+            G.degree(), key=lambda x: x[1], reverse=True
+        )[:5]
+
+        for name, degree in popular:
+            st.write(f"👤 **{name}** — {degree} connections")
+            st.progress(degree / max(dict(G.degree()).values()))
+
+        st.info("Choose **Find Friends** to generate personalized suggestions.")
+
+# ---------- Friend recommendations ----------
+elif page == "Find Friends":
+    st.title("💫 Find Your Next Friend")
+    st.write("Select a user and discover people they may know.")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        person = st.selectbox("Select your profile", sorted(G.nodes()))
+    with col2:
+        method = st.selectbox(
+            "Recommendation algorithm",
+            ["Mutual Friends", "Jaccard Similarity",
+             "Mutual Friends + Interests"]
+        )
+
+    limit = st.slider("Number of recommendations", 1, 8, 5)
+
+    st.caption(
+        f"Currently connected to {G.degree(person)} people."
+    )
+
+    if st.button("✨ Find Recommendations", type="primary"):
+        results = recommend_friends(G, person, method, limit)
+
+        if not results:
+            st.warning("No new friends to recommend.")
+        else:
+            st.subheader(f"People you may know as {person}")
+
+            for name, (score, mutual) in results:
+                with st.container(border=True):
+                    col1, col2, col3 = st.columns([2, 2, 1])
+                    with col1:
+                        st.markdown(f"### 👤 {name}")
+                        interests = G.nodes[name]["interests"]
+                        st.caption(" • ".join(interests))
+                    with col2:
+                        st.write(f"🤝 {mutual} mutual friends")
+                        st.write(
+                            f"🎯 Recommendation score: {score:.2f}"
+                        )
+                    with col3:
+                        st.write(f"Age: {G.nodes[name]['age']}")
+
+            st.success("Recommendations generated successfully.")
+
+# ---------- Explore network ----------
+elif page == "Explore Network":
+    st.title("🌐 Explore the Network")
+
+    person = st.selectbox("Choose a person", sorted(G.nodes()))
+    neighbors = list(G.neighbors(person))
+
+    c1, c2 = st.columns(2)
+    c1.metric("Direct friends", len(neighbors))
+    c2.metric("Possible new friends", G.number_of_nodes() - len(neighbors) - 1)
+
+    st.subheader(f"Connections of {person}")
+    if neighbors:
+        st.write(", ".join(neighbors))
+
+    subgraph_nodes = [person] + neighbors
+    subgraph = G.subgraph(subgraph_nodes)
+
+    fig, ax = plt.subplots(figsize=(8, 5))
+    pos = nx.spring_layout(subgraph, seed=42)
+    nx.draw(
+        subgraph, pos, ax=ax, with_labels=True,
+        node_color=[
+            "#0f9b8e" if n == person else "#818cf8"
+            for n in subgraph.nodes()
+        ],
+        node_size=1400, font_color="white",
+        edge_color="#94a3b8"
+    )
+    ax.axis("off")
+    st.pyplot(fig)
+    plt.close(fig)
+
+    st.subheader("User directory")
+    directory = pd.DataFrame([
+        {
+            "Name": n,
+            "Connections": G.degree(n),
+            "Interests": ", ".join(G.nodes[n]["interests"])
+        }
+        for n in G.nodes()
+    ])
+    st.dataframe(directory, use_container_width=True, hide_index=True)
+
+# ---------- Algorithm lab ----------
+elif page == "Algorithm Lab":
+    st.title("🧪 Recommendation Algorithm Lab")
+    st.write("Compare the results produced by different algorithms.")
+
+    person = st.selectbox("Choose a user", sorted(G.nodes()))
+    methods = [
+        "Mutual Friends",
+        "Jaccard Similarity",
+        "Mutual Friends + Interests"
+    ]
+
+    comparison = []
+    for method_name in methods:
+        results = recommend_friends(G, person, method_name, 5)
+        for rank, (name, (score, mutual)) in enumerate(results, 1):
+            comparison.append({
+                "Algorithm": method_name,
+                "Rank": rank,
+                "Suggested Friend": name,
+                "Mutual Friends": mutual,
+                "Score": round(score, 3)
+            })
+
+    st.dataframe(
+        pd.DataFrame(comparison),
+        use_container_width=True,
+        hide_index=True
+    )
+
+    st.markdown("### How the algorithms work")
+    st.markdown("""
+    - **Mutual Friends:** ranks users by the number of shared friends.
+    - **Jaccard Similarity:** measures overlap between friendship circles.
+    - **Mutual Friends + Interests:** combines shared friends and
+      shared interests to rank candidates.
+    """)
+
+# ---------- About ----------
+else:
+    st.title("About FriendMatch")
+    st.write("""
+    FriendMatch is an educational social network analysis project.
+    It recommends new connections using graph theory and similarity
+    measures.
+
+    **Technology stack**
+    - Python
+    - Streamlit
+    - NetworkX
+    - Pandas
+    - Matplotlib
+
+    **Workflow**
+    1. Represent users as graph nodes.
+    2. Represent friendships as edges.
+    3. Identify users who are not already connected.
+    4. Calculate recommendation scores.
+    5. Rank and display suggested friends.
+
+    The included dataset is synthetic and intended for demonstration.
+    """)
+    st.info(
+        "Recommendations are based on the sample network, "
+        "not on real social media accounts."
+    )
