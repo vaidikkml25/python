@@ -1,0 +1,262 @@
+
+from flask import Flask, render_template_string, request, redirect, url_for
+
+app = Flask(__name__)
+
+# Social network graph
+graph = {}
+
+
+def add_user(name):
+    graph.setdefault(name, set())
+
+
+def add_friend(a, b):
+    add_user(a)
+    add_user(b)
+    graph[a].add(b)
+    graph[b].add(a)
+
+
+def mutual_friends(a, b):
+    return graph.get(a, set()) & graph.get(b, set())
+
+
+def recommend(user, top_n=5):
+    if user not in graph:
+        return []
+
+    scores = {}
+
+    # Find friends of friends using graph traversal
+    for friend in graph[user]:
+        for fof in graph[friend]:
+            if fof != user and fof not in graph[user]:
+                scores[fof] = scores.get(fof, 0) + 1
+
+    # Rank by mutual friends
+    ranked = sorted(
+        scores.items(),
+        key=lambda item: (-item[1], item[0].lower())
+    )
+
+    return ranked[:top_n]
+
+
+# Sample network
+sample = [
+    ("Aarav", "Isha"),
+    ("Aarav", "Rohan"),
+    ("Aarav", "Neha"),
+    ("Isha", "Meera"),
+    ("Rohan", "Meera"),
+    ("Neha", "Meera"),
+    ("Isha", "Kabir"),
+    ("Rohan", "Kabir"),
+    ("Neha", "Sara"),
+    ("Kabir", "Tanvi"),
+    ("Sara", "Dev"),
+    ("Zoya", "Yash")
+]
+
+for a, b in sample:
+    add_friend(a, b)
+
+
+# Website page
+HTML = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Friend Recommender</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #f1f5f9;
+            margin: 0;
+            padding: 25px;
+            color: #14202e;
+        }
+        .container {
+            max-width: 800px;
+            margin: auto;
+        }
+        .card {
+            background: white;
+            padding: 20px;
+            margin: 15px 0;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px #0001;
+        }
+        h1 { color: #2b6cb0; }
+        input, select, button {
+            padding: 10px;
+            margin: 5px 0;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            font-size: 15px;
+        }
+        input, select { max-width: 100%; }
+        button {
+            background: #2b6cb0;
+            color: white;
+            cursor: pointer;
+        }
+        li { margin: 12px 0; }
+        .mutual { color: #64748b; font-size: 14px; }
+        @media (max-width: 600px) {
+            body { padding: 12px; }
+            .card { padding: 14px; }
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>Friend Recommender</h1>
+    <p>Discover new friends using mutual connections.</p>
+
+    <div class="card">
+        <h2>Find Recommendations</h2>
+        <form method="GET">
+            <label>Select person:</label><br>
+            <select name="user">
+                {% for name in names %}
+                <option value="{{ name }}"
+                    {% if name == selected %}selected{% endif %}>
+                    {{ name }}
+                </option>
+                {% endfor %}
+            </select>
+
+            <br>
+            <label>Number of recommendations:</label><br>
+            <select name="top_n">
+                {% for n in [1, 3, 5, 10] %}
+                <option value="{{ n }}"
+                    {% if n == top_n %}selected{% endif %}>
+                    {{ n }}
+                </option>
+                {% endfor %}
+            </select>
+
+            <br>
+            <button type="submit">Recommend Friends</button>
+        </form>
+
+        <h3>Recommended Friends</h3>
+        {% if recommendations %}
+        <ol>
+            {% for name, score in recommendations %}
+            <li>
+                <strong>{{ name }}</strong>
+                — {{ score }} mutual friend(s)
+                <div class="mutual">
+                    Mutual friends:
+                    {{ mutual(selected, name)|sort|join(', ') }}
+                </div>
+            </li>
+            {% endfor %}
+        </ol>
+        {% else %}
+        <p>No recommendations available.</p>
+        {% endif %}
+    </div>
+
+    <div class="card">
+        <h2>Add a Friendship</h2>
+        <form method="POST">
+            <input type="hidden" name="action" value="add">
+            <input name="person" placeholder="Enter person name" required>
+            <input name="friend" placeholder="Enter friend name" required>
+            <br>
+            <button type="submit">Add Friendship</button>
+        </form>
+        {% if message %}
+        <p>{{ message }}</p>
+        {% endif %}
+    </div>
+
+    <div class="card">
+        <h2>Network Members</h2>
+        <p>{{ names|join(', ') }}</p>
+        <p>Total users: {{ names|length }}</p>
+    </div>
+</div>
+</body>
+</html>
+"""
+
+
+```python
+@app.route("/", methods=["GET", "POST"])
+def home():
+    message = ""
+
+    if request.method == "POST":
+        a = " ".join(request.form.get("person", "").split())
+        b = " ".join(request.form.get("friend", "").split())
+
+        if not a or not b:
+            message = "Please enter both names."
+
+        elif a.casefold() == b.casefold():
+            message = "A person cannot befriend themselves."
+
+        else:
+            # Reuse existing names without case sensitivity
+            a = next(
+                (n for n in graph if n.casefold() == a.casefold()), a
+            )
+            b = next(
+                (n for n in graph if n.casefold() == b.casefold()), b
+            )
+
+            if b in graph.get(a, set()):
+                message = "These people are already friends."
+            else:
+                add_friend(a, b)
+                message = f"Friendship added: {a} and {b}."
+
+    names = sorted(graph, key=str.lower)
+
+    selected = request.args.get("user", "Aarav")
+    if selected not in graph:
+        selected = names[0] if names else ""
+
+    try:
+        top_n = int(request.args.get("top_n", 5))
+    except ValueError:
+        top_n = 5
+
+    if top_n not in (1, 3, 5, 10):
+        top_n = 5
+
+    recommendations = recommend(selected, top_n)
+
+    return render_template_string(
+        HTML,
+        names=names,
+        selected=selected,
+        top_n=top_n,
+        recommendations=recommendations,
+        mutual=mutual_friends,
+        message=message
+    )
+
+
+if __name__ == "__main__":
+    app.run(debug=True)
+```
+
+## 3. Run your website
+
+Open the terminal in the folder containing `app.py` and execute:
+
+```bash
+python app.py
+```
+
+Then open `http://127.0.0.1:5000` in your browser.
+
+**Note:** This version puts the HTML and CSS inside the Python file, so you only need `app.py`. Friendships are stored in memory and will reset when the application restarts.
