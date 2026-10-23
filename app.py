@@ -1,313 +1,186 @@
-import math
+"""
+Social Network Friend Recommendation System
+Using Graphs and Graph Traversal (BFS)
 
-from flask import Flask, render_template_string, request
+Users are nodes, friendships are edges.
+Recommendations = friends-of-friends ranked by number of mutual connections.
+"""
 
-app = Flask(__name__)
+import streamlit as st
 
-# ---------------------------------------------------------------------------
-# Social network graph (adjacency sets, stored in memory)
-# ---------------------------------------------------------------------------
-graph = {}
+st.set_page_config(page_title="Friend Recommendation System", page_icon="🤝", layout="wide")
 
 
-def add_user(name):
+# ---------------- Core graph logic ----------------
+def add_user(graph, name):
     graph.setdefault(name, set())
 
 
-def add_friend(a, b):
-    add_user(a)
-    add_user(b)
+def add_friend(graph, a, b):
+    add_user(graph, a)
+    add_user(graph, b)
     graph[a].add(b)
     graph[b].add(a)
 
 
-def mutual_friends(a, b):
-    return graph.get(a, set()) & graph.get(b, set())
+def mutual_friends(graph, u1, u2):
+    return graph[u1] & graph[u2]
 
 
-def recommend(user, top_n=5):
-    """Rank friends-of-friends by number of mutual friends."""
-    if user not in graph:
-        return []
-
+def recommend(graph, user, top_n=5):
     scores = {}
     for friend in graph[user]:
         for fof in graph[friend]:
             if fof != user and fof not in graph[user]:
                 scores[fof] = scores.get(fof, 0) + 1
-
-    ranked = sorted(scores.items(), key=lambda item: (-item[1], item[0].lower()))
+    ranked = sorted(scores.items(), key=lambda x: (-x[1], x[0]))
     return ranked[:top_n]
 
 
-def build_graph_view(selected, recommended_names):
-    """Lay the network out on a circle and return nodes/edges for SVG."""
-    names = sorted(graph, key=str.lower)
-    cx, cy, radius = 280, 260, 190
-    positions = {}
-    for i, name in enumerate(names):
-        angle = 2 * math.pi * i / max(len(names), 1) - math.pi / 2
-        positions[name] = (cx + radius * math.cos(angle), cy + radius * math.sin(angle))
+def demo_graph():
+    g = {}
+    for a, b in [
+        ("Aarav", "Isha"), ("Aarav", "Rohan"), ("Isha", "Meera"), ("Rohan", "Meera"),
+        ("Meera", "Kabir"), ("Rohan", "Kabir"), ("Isha", "Sneha"), ("Kabir", "Diya"),
+    ]:
+        add_friend(g, a, b)
+    return g
 
-    friends = graph.get(selected, set())
-    nodes = []
-    for name in names:
-        x, y = positions[name]
-        if name == selected:
-            kind = "me"
-        elif name in friends:
-            kind = "friend"
-        elif name in recommended_names:
-            kind = "rec"
+
+def to_dot(graph, selected=None, recs=()):
+    friends = graph.get(selected, set()) if selected else set()
+    lines = ["graph G {", "layout=neato; overlap=false; splines=true;",
+             'node [shape=circle, style=filled, fontname="Helvetica", fontsize=11, fillcolor="#E5E7EB", color="#9CA3AF"];',
+             'edge [color="#9CA3AF"];']
+    for n in graph:
+        if n == selected:
+            style = 'fillcolor="#6366F1", fontcolor="white", color="#4338CA"'
+        elif n in recs:
+            style = 'fillcolor="#34D399", color="#059669"'
+        elif n in friends:
+            style = 'fillcolor="#FDE68A", color="#D97706"'
         else:
-            kind = "other"
-        # push the label a bit further out than the dot
-        lx = cx + (radius + 28) * (x - cx) / radius
-        ly = cy + (radius + 28) * (y - cy) / radius
-        nodes.append({"name": name, "x": x, "y": y, "lx": lx, "ly": ly, "kind": kind})
-
-    edges = []
+            style = ""
+        lines.append(f'"{n}" [{style}];')
     seen = set()
     for a in graph:
         for b in graph[a]:
-            key = tuple(sorted((a, b)))
-            if key in seen:
-                continue
-            seen.add(key)
-            hot = selected in key
-            edges.append({
-                "x1": positions[a][0], "y1": positions[a][1],
-                "x2": positions[b][0], "y2": positions[b][1],
-                "hot": hot,
-            })
-    # draw highlighted edges last so they sit on top
-    edges.sort(key=lambda e: e["hot"])
-    return nodes, edges
+            if (b, a) not in seen:
+                seen.add((a, b))
+                lines.append(f'"{a}" -- "{b}";')
+    lines.append("}")
+    return "\n".join(lines)
 
 
-# ---------------------------------------------------------------------------
-# Sample network
-# ---------------------------------------------------------------------------
-sample = [
-    ("Aarav", "Isha"),
-    ("Aarav", "Rohan"),
-    ("Aarav", "Neha"),
-    ("Isha", "Meera"),
-    ("Rohan", "Meera"),
-    ("Neha", "Meera"),
-    ("Isha", "Kabir"),
-    ("Rohan", "Kabir"),
-    ("Neha", "Sara"),
-    ("Kabir", "Tanvi"),
-    ("Sara", "Dev"),
-    ("Zoya", "Yash"),
-]
+# ---------------- State ----------------
+if "graph" not in st.session_state:
+    st.session_state.graph = demo_graph()
+graph = st.session_state.graph
 
-for a, b in sample:
-    add_friend(a, b)
+# ---------------- Sidebar ----------------
+with st.sidebar:
+    st.header("⚙️ Build the network")
 
-
-# ---------------------------------------------------------------------------
-# Web page
-# ---------------------------------------------------------------------------
-HTML = """
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="utf-8">
-    <title>Friend Recommender</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <style>
-        * { box-sizing: border-box; }
-        body {
-            font-family: Arial, sans-serif;
-            background: #f1f5f9;
-            margin: 0;
-            padding: 25px;
-            color: #14202e;
-        }
-        .container { max-width: 860px; margin: auto; }
-        .card {
-            background: white;
-            padding: 20px;
-            margin: 15px 0;
-            border-radius: 12px;
-            box-shadow: 0 2px 8px #0001;
-        }
-        h1 { color: #2b6cb0; margin-bottom: 4px; }
-        h2 { margin-top: 0; }
-        input, select, button {
-            padding: 10px;
-            margin: 5px 0;
-            border: 1px solid #ccc;
-            border-radius: 6px;
-            font-size: 15px;
-        }
-        input, select { max-width: 100%; }
-        button { background: #2b6cb0; color: white; cursor: pointer; border: none; }
-        button:hover { background: #245a94; }
-        li { margin: 12px 0; }
-        .mutual { color: #64748b; font-size: 14px; }
-        .message { font-weight: bold; color: #2b6cb0; }
-        .legend span { display: inline-block; margin-right: 14px; font-size: 14px; }
-        .dot {
-            display: inline-block; width: 11px; height: 11px;
-            border-radius: 50%; margin-right: 5px; vertical-align: middle;
-        }
-        svg { width: 100%; height: auto; display: block; }
-        @media (max-width: 600px) {
-            body { padding: 12px; }
-            .card { padding: 14px; }
-        }
-    </style>
-</head>
-<body>
-<div class="container">
-    <h1>Friend Recommender</h1>
-    <p>Discover new friends using mutual connections.</p>
-
-    <div class="card">
-        <h2>Find Recommendations</h2>
-        <form method="GET">
-            <label>Select person:</label><br>
-            <select name="user">
-                {% for name in names %}
-                <option value="{{ name }}" {% if name == selected %}selected{% endif %}>
-                    {{ name }}
-                </option>
-                {% endfor %}
-            </select>
-            <br>
-            <label>Number of recommendations:</label><br>
-            <select name="top_n">
-                {% for n in [1, 3, 5, 10] %}
-                <option value="{{ n }}" {% if n == top_n %}selected{% endif %}>{{ n }}</option>
-                {% endfor %}
-            </select>
-            <br>
-            <button type="submit">Recommend Friends</button>
-        </form>
-
-        <h3>Recommended Friends</h3>
-        {% if recommendations %}
-        <ol>
-            {% for name, score in recommendations %}
-            <li>
-                <strong>{{ name }}</strong> &mdash; {{ score }} mutual friend(s)
-                <div class="mutual">
-                    Mutual friends: {{ mutual(selected, name)|sort|join(', ') }}
-                </div>
-            </li>
-            {% endfor %}
-        </ol>
-        {% else %}
-        <p>No recommendations available.</p>
-        {% endif %}
-    </div>
-
-    <div class="card">
-        <h2>Network Graph</h2>
-        <div class="legend">
-            <span><i class="dot" style="background:#2b6cb0"></i>Selected</span>
-            <span><i class="dot" style="background:#2f9e6b"></i>Friend</span>
-            <span><i class="dot" style="background:#e8890c"></i>Recommended</span>
-            <span><i class="dot" style="background:#94a3b8"></i>Other</span>
-        </div>
-        <svg viewBox="0 0 560 520" role="img" aria-label="Friendship network graph">
-            {% for e in edges %}
-            <line x1="{{ e.x1|round(1) }}" y1="{{ e.y1|round(1) }}"
-                  x2="{{ e.x2|round(1) }}" y2="{{ e.y2|round(1) }}"
-                  stroke="{{ '#2b6cb0' if e.hot else '#cbd5e1' }}"
-                  stroke-width="{{ 2.5 if e.hot else 1.5 }}"/>
-            {% endfor %}
-            {% for n in nodes %}
-            {% set fill = {'me': '#2b6cb0', 'friend': '#2f9e6b', 'rec': '#e8890c', 'other': '#94a3b8'}[n.kind] %}
-            <circle cx="{{ n.x|round(1) }}" cy="{{ n.y|round(1) }}"
-                    r="{{ 12 if n.kind == 'me' else 9 }}" fill="{{ fill }}"
-                    stroke="white" stroke-width="2"/>
-            <text x="{{ n.lx|round(1) }}" y="{{ n.ly|round(1) }}"
-                  text-anchor="middle" dominant-baseline="middle"
-                  font-size="13" fill="#14202e"
-                  font-weight="{{ 'bold' if n.kind in ('me', 'rec') else 'normal' }}">{{ n.name }}</text>
-            {% endfor %}
-        </svg>
-    </div>
-
-    <div class="card">
-        <h2>Add a Friendship</h2>
-        <form method="POST">
-            <input name="person" placeholder="Enter person name" required>
-            <input name="friend" placeholder="Enter friend name" required>
-            <br>
-            <button type="submit">Add Friendship</button>
-        </form>
-        {% if message %}
-        <p class="message">{{ message }}</p>
-        {% endif %}
-    </div>
-
-    <div class="card">
-        <h2>Network Members</h2>
-        <p>{{ names|join(', ') }}</p>
-        <p>Total users: {{ names|length }}</p>
-    </div>
-</div>
-</body>
-</html>
-"""
-
-
-@app.route("/", methods=["GET", "POST"])
-def home():
-    message = ""
-    selected = request.args.get("user", "Aarav")
-
-    if request.method == "POST":
-        a = " ".join(request.form.get("person", "").split())
-        b = " ".join(request.form.get("friend", "").split())
-
-        if not a or not b:
-            message = "Please enter both names."
-        elif a.casefold() == b.casefold():
-            message = "A person cannot befriend themselves."
+    new_user = st.text_input("Add a user", placeholder="e.g. Vaidik")
+    if st.button("➕ Add user", use_container_width=True):
+        name = new_user.strip()
+        if name:
+            add_user(graph, name)
+            st.success(f"Added {name}")
         else:
-            # Reuse existing names regardless of letter case
-            a = next((n for n in graph if n.casefold() == a.casefold()), a)
-            b = next((n for n in graph if n.casefold() == b.casefold()), b)
+            st.warning("Enter a name first.")
 
-            if b in graph.get(a, set()):
-                message = "These people are already friends."
+    st.divider()
+    users = sorted(graph)
+    if len(users) >= 2:
+        a = st.selectbox("User A", users, key="fa")
+        b = st.selectbox("User B", users, index=1, key="fb")
+        if st.button("🤝 Add friendship", use_container_width=True):
+            if a == b:
+                st.warning("Pick two different users.")
+            elif b in graph[a]:
+                st.info("Already friends.")
             else:
-                add_friend(a, b)
-                message = f"Friendship added: {a} and {b}."
-                selected = a  # show the person who was just updated
+                add_friend(graph, a, b)
+                st.success(f"{a} ↔ {b}")
+    else:
+        st.caption("Add at least 2 users to create friendships.")
 
-    names = sorted(graph, key=str.lower)
-    if selected not in graph:
-        selected = names[0] if names else ""
+    st.divider()
+    c1, c2 = st.columns(2)
+    if c1.button("Load demo", use_container_width=True):
+        st.session_state.graph = demo_graph()
+        st.rerun()
+    if c2.button("Clear all", use_container_width=True):
+        st.session_state.graph = {}
+        st.rerun()
 
-    try:
-        top_n = int(request.args.get("top_n", 5))
-    except ValueError:
-        top_n = 5
-    if top_n not in (1, 3, 5, 10):
-        top_n = 5
+# ---------------- Main ----------------
+st.title("🤝 Social Network Friend Recommendation System")
+st.caption("Graphs + BFS (friends-of-friends) ranked by mutual connections")
 
-    recommendations = recommend(selected, top_n)
-    nodes, edges = build_graph_view(selected, {n for n, _ in recommendations})
+users = sorted(graph)
+edges = sum(len(v) for v in graph.values()) // 2
+m1, m2 = st.columns(2)
+m1.metric("Users (nodes)", len(users))
+m2.metric("Friendships (edges)", edges)
 
-    return render_template_string(
-        HTML,
-        names=names,
-        selected=selected,
-        top_n=top_n,
-        recommendations=recommendations,
-        mutual=mutual_friends,
-        message=message,
-        nodes=nodes,
-        edges=edges,
-    )
+if not users:
+    st.info("The network is empty. Add users from the sidebar or click **Load demo**.")
+    st.stop()
 
+col_sel, col_n = st.columns([3, 1])
+user = col_sel.selectbox("Select a user", users)
+top_n = col_n.slider("Top N", 1, 10, 5)
 
-if __name__ == "__main__":
-    app.run(debug=True)
+results = recommend(graph, user, top_n)
+rec_names = [n for n, _ in results]
+
+tab1, tab2, tab3, tab4 = st.tabs(["🕸️ Network", "✨ Recommendations", "👥 Mutual Friends", "📘 How it works"])
+
+with tab1:
+    st.graphviz_chart(to_dot(graph, user, rec_names), use_container_width=True)
+    st.markdown("🟣 Selected user &nbsp; 🟡 Current friends &nbsp; 🟢 Recommended &nbsp; ⚪ Others")
+
+with tab2:
+    st.subheader(f"Recommended friends for {user}")
+    if not results:
+        st.info("No recommendations — this user has no friends-of-friends outside their circle yet.")
+    for rank, (name, count) in enumerate(results, 1):
+        via = ", ".join(sorted(mutual_friends(graph, user, name)))
+        with st.container(border=True):
+            st.markdown(f"**#{rank} &nbsp; {name}** — {count} mutual friend{'s' if count != 1 else ''}")
+            st.caption(f"Via: {via}")
+
+with tab3:
+    others = [u for u in users if u != user]
+    if others:
+        other = st.selectbox("Compare with", others, index=others.index(rec_names[0]) if rec_names else 0)
+        common = sorted(mutual_friends(graph, user, other))
+        if common:
+            st.success(f"Mutual friends of {user} and {other}: {', '.join(common)}")
+        else:
+            st.info(f"{user} and {other} have no mutual friends.")
+    else:
+        st.info("Add more users to compare.")
+
+with tab4:
+    st.markdown("""
+**Idea:** a user's best friend suggestions are people they don't know yet but who are connected to many of their friends.
+
+1. Users are **nodes**, friendships are **undirected edges** (adjacency list using sets).
+2. For the chosen user, visit every friend (BFS level 1), then every friend's friends (level 2).
+3. Skip the user themself and anyone already a friend.
+4. Count how many times each candidate appears — that is the **mutual friend count**.
+5. Sort by count (highest first) and return the top N.
+
+**Complexity:** O(Σ deg(friend)) per query, plus O(k log k) to sort k candidates.
+""")
+    st.code('''def recommend(graph, user, top_n=5):
+    scores = {}
+    for friend in graph[user]:
+        for fof in graph[friend]:
+            if fof != user and fof not in graph[user]:
+                scores[fof] = scores.get(fof, 0) + 1
+    ranked = sorted(scores.items(), key=lambda x: -x[1])
+    return ranked[:top_n]''', language="python")
